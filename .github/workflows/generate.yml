@@ -8,12 +8,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: write-permission test (expect 403 for fork PRs)
+      - name: write-permission test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          curl -s -o /dev/null -w "Issue-create API status: %{http_code}\n" \
-            -X POST -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          # contents:write is the only permission declared, so test a contents write:
+          # create a throwaway branch (201 = write worked, 403 = token is read-only)
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/issues \
-            -d '{"title":"token write test"}'
+            "https://api.github.com/repos/$REPO/git/refs" \
+            -d "{\"ref\":\"refs/heads/token-write-test-$RUN_ID\",\"sha\":\"$SHA\"}")
+          msg="Create-branch API status: $code (head_repo=$HEAD_REPO)"
+          echo "$msg"
+          echo "::notice title=token-write-test::$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" = "201" ]; then
+            curl -s -o /dev/null -X DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/git/refs/heads/token-write-test-$RUN_ID"
+          fi
       - name: generate
         run: make generate
